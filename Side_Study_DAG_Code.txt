@@ -1,0 +1,119 @@
+dag {
+bb="-5.455,-4.797,6.303,4.655"
+"Autoimmune disease" [pos="-4.068,3.810"]
+"Blood pressure" [pos="5.319,-1.500"]
+"Catheter use" [pos="-3.605,-3.347"]
+"Congenital abnormalities of GU tract" [pos="-3.261,-4.645"]
+"Hormonal Treatment" [pos="-0.858,-1.094"]
+"Kidney disease" [pos="-3.358,-1.331"]
+"MI/stroke" [outcome,pos="1.658,0.191"]
+"Neurological Conditions" [pos="-1.584,-2.920"]
+"Physical activity" [pos="5.722,-3.563"]
+"Prostatic Dx" [pos="-4.616,-2.109"]
+"Prothrombotic conditions" [pos="3.755,-2.447"]
+"Severity of illness indicator (emergency vs elective)" [pos="1.932,-4.104"]
+Abx [pos="0.513,-2.109"]
+Age [pos="-4.729,1.003"]
+BMI [pos="1.561,3.573"]
+Cholesterol [pos="1.868,-2.886"]
+Dementia [pos="0.158,3.573"]
+Deprivation [pos="-1.616,3.810"]
+Diabetes [pos="-3.358,2.389"]
+Ethnicity [pos="2.964,3.505"]
+Frailty [pos="-4.439,-0.096"]
+Genetics [pos="5.190,2.406"]
+Immunosuppressants [pos="4.158,-4.510"]
+Inflammation [pos="4.609,3.471"]
+Menopause [pos="0.448,-3.157"]
+Sex [pos="5.900,0.969"]
+Smoking [pos="5.722,-0.502"]
+Steroids [pos="-4.697,2.271"]
+UTI [exposure,pos="-1.068,0.326"]
+"Autoimmune disease" -> "MI/stroke"
+"Autoimmune disease" -> Immunosuppressants
+"Autoimmune disease" -> UTI
+"Blood pressure" -> "MI/stroke"
+"Catheter use" -> UTI
+"Congenital abnormalities of GU tract" -> UTI
+"Hormonal Treatment" -> "MI/stroke"
+"Hormonal Treatment" -> UTI
+"Kidney disease" -> "MI/stroke"
+"Kidney disease" -> UTI
+"Neurological Conditions" -> "MI/stroke"
+"Neurological Conditions" -> UTI
+"Physical activity" -> "Blood pressure"
+"Physical activity" -> "MI/stroke"
+"Physical activity" -> Cholesterol
+"Prostatic Dx" -> UTI
+"Prothrombotic conditions" -> "MI/stroke"
+"Severity of illness indicator (emergency vs elective)" -> "MI/stroke"
+Abx -> "MI/stroke"
+Age -> "Blood pressure"
+Age -> "Catheter use"
+Age -> "Hormonal Treatment"
+Age -> "MI/stroke"
+Age -> "Neurological Conditions"
+Age -> "Prostatic Dx"
+Age -> Dementia
+Age -> Diabetes
+Age -> Frailty
+Age -> Menopause
+Age -> UTI
+BMI -> "MI/stroke"
+BMI -> Diabetes
+BMI -> UTI
+Cholesterol -> "MI/stroke"
+Dementia -> "MI/stroke"
+Dementia -> UTI
+Deprivation -> "MI/stroke"
+Deprivation -> "Severity of illness indicator (emergency vs elective)"
+Deprivation -> BMI
+Deprivation -> Diabetes
+Deprivation -> Immunosuppressants
+Deprivation -> Smoking
+Deprivation -> UTI
+Diabetes -> "MI/stroke"
+Diabetes -> UTI
+Ethnicity -> "MI/stroke"
+Ethnicity -> BMI
+Ethnicity -> Diabetes
+Ethnicity -> Smoking
+Ethnicity -> UTI
+Frailty -> "MI/stroke"
+Frailty -> UTI
+Genetics -> "Autoimmune disease"
+Genetics -> "Blood pressure"
+Genetics -> "Congenital abnormalities of GU tract"
+Genetics -> "Kidney disease"
+Genetics -> "MI/stroke"
+Genetics -> "Neurological Conditions"
+Genetics -> "Prostatic Dx"
+Genetics -> "Prothrombotic conditions"
+Genetics -> BMI
+Genetics -> Cholesterol
+Genetics -> Dementia
+Genetics -> Diabetes
+Genetics -> Ethnicity
+Genetics -> Sex
+Genetics -> Smoking
+Genetics -> UTI
+Immunosuppressants -> "MI/stroke"
+Immunosuppressants -> UTI
+Inflammation -> "MI/stroke"
+Menopause -> "Hormonal Treatment"
+Menopause -> "MI/stroke"
+Menopause -> UTI
+Sex -> "Autoimmune disease"
+Sex -> "Hormonal Treatment"
+Sex -> "MI/stroke"
+Sex -> "Prostatic Dx"
+Sex -> Menopause
+Sex -> Smoking
+Sex -> UTI
+Smoking -> "MI/stroke"
+Steroids -> "MI/stroke"
+Steroids -> UTI
+UTI -> "MI/stroke"
+UTI -> Abx
+UTI -> Inflammation
+}
