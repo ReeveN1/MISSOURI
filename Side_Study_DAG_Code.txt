@@ -1,3 +1,5 @@
+Model code for Dagitty.net
+
 dag {
 bb="-5.455,-4.797,6.303,4.655"
 "Autoimmune disease" [pos="-4.068,3.810"]
