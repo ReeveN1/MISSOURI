@@ -1,0 +1,27 @@
+This document presents example results of the analysis of acute cardiovascular events (MI and stroke) with GP diagnosed (suspected) UTI as exposure. 
+Suspected UTIs with positive culture are compared to suspected UTIs with no microbiological evidence of UTI.
+
+This document presents results for MI, from one imputed dataset. Final results were obtained by pooling these results with results from the other imputed datsets.
+Number of events and total n have been rounded to the nearest ten.
+
+-------------------------------------------------
+
+Cox mixed-effects model fit by maximum likelihood
+
+  events, n = 160, 158610
+  Iterations= 50 213 
+                    NULL Integrated    Fitted
+Log-likelihood -4314.902  -3562.477 -2322.515
+
+                    Chisq     df p     AIC     BIC
+Integrated loglik 1504.85   2.00 0 1500.85 1494.71
+ Penalized loglik 3984.77 956.24 0 2072.29 -862.32
+
+Model:  Surv(MITime, MI_WITHIN90) ~ UTI_OUTCOME + (1 | PID) 
+Fixed coefficients
+                              coef exp(coef)  se(coef)    z    p
+UTI_OUTCOMEConfirmed UTI 0.1442539  1.155177 0.1208288 1.19 0.23
+
+Random effects
+ Group Variable  Std Dev  Variance
+ PID   Intercept 1.919798 3.685625

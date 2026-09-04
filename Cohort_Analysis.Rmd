@@ -1,0 +1,378 @@
+---
+title: "Hazard of MI or Stroke After UTI With and Without Positive Microbiology"
+output: html_document
+---
+
+# Introduction
+
+This document presents results of the analysis of acute cardiovascular events (MI and stroke) with GP diagnosed (suspected) UTI as exposure. Suspected UTIs with positive culture are compared to suspected UTIs with no microbiological evidence of UTI.
+Number of events are all rounded to the nearest ten.
+
+# Data
+
+Data Tables: SAILW0972V.VB_WLGP_SUB
+
+Derived from:  
+
+SAIL0972V.WRRS_OBSERVATION_RESULT_20211019  
+SAIL0972V.WRRS_OBSERVATION_REQUEST_20211019  
+SAIL0972V.ADDE_DEATHS_20210428  
+SAIL0972V.WDSD_CLEAN_ADD_GEOG_CHAR_LSOA2011_20210502  
+SAIL0972V.WDSD_AR_PERS_20210502  
+SAIL0972V.WDSD_CLEAN_ADD_WALES_20210502  
+SAIL0972V.PEDW_SPELL_20211101  
+SAIL0972V.PEDW_EPISODE_20211101  
+SAIL0972V.PEDW_DIAG_20211101  
+SAIL0972V.WLGP_GP_EVENT_CLEANSED_20220301  
+SAIL0972V.WLGP_CLEAN_GP_REG_MEDIAN_20220301
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+#required packages
+library(RODBC)
+library(tcltk)
+library(xlsx)
+library(dplyr)
+library(lubridate)
+library(kableExtra)
+library(survival)
+library(coxme)
+library(mice)
+library(Publish)
+library(lava)
+library(ggplot2)
+theme_set(theme_bw())#sets theme for plots - white background
+```
+
+```{r Connect}
+# connect to SAIL SQL
+getLogin<-function(userName=''){  
+  require(tcltk);  
+  wnd<-tktoplevel();
+  tclVar(userName)->user;
+  tclVar("")->passVar;
+  #Label  
+  
+  #Username box  
+  tkgrid(tklabel(wnd,text="Username:"));  
+  tkgrid(tkentry(wnd,textvariable=user)->passBox);  
+  
+  #Password box  
+  tkgrid(tklabel(wnd,text="Password:"));  
+  tkgrid(tkentry(wnd,textvariable=passVar,show="*")->passBox);  
+  #Hitting return will also submit password  
+  tkbind(passBox,"<Return>",function() tkdestroy(wnd));  
+  #OK button  
+  tkgrid(tkbutton(wnd,text="OK",command=function() tkdestroy(wnd)));  
+  #Wait for user to click OK  
+  tkwait.window(wnd);  
+  password<-tclvalue(passVar);
+  userName<-tclvalue(user);
+  return(c(userName,password));  
+} 
+
+login <- getLogin('<username>') # change user name and provide SAIL password in pop up box 
+channel <- odbcConnect('PR_SAIL',login[1],login[2]) # connect to DB2/SAIL 
+rm(login) # hides password 
+```
+
+```{r ReadData}
+
+Cohort<- sqlQuery(channel, "SELECT * FROM SAILW0972V.VB_WLGP_SUB")
+Cohort$UTI_DT<-Cohort$DIAG_DT
+Cohort$MI_WITHIN90[is.na(Cohort$MI_WITHIN90)]<-0
+Cohort$STROKE_WITHIN90[is.na(Cohort$STROKE_WITHIN90)]<-0
+
+Cohort[c("UTI_OUTCOME")]<-lapply(Cohort[c("UTI_OUTCOME")],as.factor)
+Cohort$UTI_OUTCOME<-relevel(Cohort$UTI_OUTCOME,ref="No microbiological evidence of UTI")
+
+Cohort$WIMD<-as.numeric(substr(Cohort$WIMD_2019_QUINTILE_DESC,1,1))
+
+```
+
+
+```{r Timevars}
+#create time variables
+#calculate follow up time - time from UTI to earliest of MI/stroke, end, or 90 days
+
+#time from  UTI to MI
+Cohort$MITime<-Cohort$MI_DT-Cohort$UTI_DT
+#if end date within 90 days of UTI, and no MI, use time to end
+Cohort$MITime[((Cohort$INC_END_DT-Cohort$UTI_DT)<90)&is.na(Cohort$MITime)]<-Cohort$INC_END_DT[((Cohort$INC_END_DT-Cohort$UTI_DT)<90)&is.na(Cohort$MITime)]-Cohort$UTI_DT[((Cohort$INC_END_DT-Cohort$UTI_DT)<90)&is.na(Cohort$MITime)]
+#if no MI, use 90 days
+Cohort$MITime[is.na(Cohort$MITime)]<-90
+#if MI after 90 days, use 90 days
+Cohort$MITime[Cohort$MITime>90]<-90
+
+Cohort$StrokeTime<-Cohort$STROKE_DT-Cohort$UTI_DT
+Cohort$StrokeTime[((Cohort$INC_END_DT-Cohort$UTI_DT)<90)&is.na(Cohort$StrokeTime)]<-Cohort$INC_END_DT[((Cohort$INC_END_DT-Cohort$UTI_DT)<90)&is.na(Cohort$StrokeTime)]-Cohort$UTI_DT[((Cohort$INC_END_DT-Cohort$UTI_DT)<90)&is.na(Cohort$StrokeTime)]
+Cohort$StrokeTime[is.na(Cohort$StrokeTime)]<-90
+Cohort$StrokeTime[Cohort$StrokeTime>90]<-90
+
+```
+
+
+```{r CompleteCaseIPTW}
+#complete case
+#propensity scores +IPTW
+Cohortcc<-Cohort[!is.na(Cohort$BMI_VAL)&!is.na(Cohort$ETHNIC)&!is.na(Cohort$WIMD_2019_QUINTILE_DESC),]
+
+#propensity scores
+Cohortcc$PropenScores<-glm(UTI_OUTCOME~AGE_AT_DIAG+BMI_VAL+DEMENTIA+WIMD_2019_QUINTILE_DESC+DIABETES+ETHNIC+EFI+HRT+RENAL_DISEASE+PARKINSONS+MND+MS+GNDR_CD+PRIM_IMMDEF+AUTOIMM, family=binomial(link="logit"), data=Cohortcc)$fitted
+#IPTW
+Cohortcc$weight<-ifelse(Cohortcc$UTI_OUTCOME=="Confirmed UTI",1/(Cohortcc$PropenScores),1/(1-Cohortcc$PropenScores))
+
+```
+
+```{r CompleteCase,include=FALSE}
+#complete case
+#Cox prop hazards
+#90 days
+
+ccAnalysis<-function(Cohortcc){
+
+#set up results table
+rescc<-matrix(nrow=2,ncol=4)
+rescc<-data.frame(rescc)
+colnames(rescc)<-c("HR","Crude","NEventsConfirmed","NEventsNoMicroEv")
+rownames(rescc)<-c("MI","Stroke")
+
+
+MIHR <- coxme(Surv(MITime, MI_WITHIN90) ~ UTI_OUTCOME + (1|ALF_PE), weights=weight, data = Cohortcc)
+StrokeHR<- coxme(Surv(StrokeTime, STROKE_WITHIN90) ~ UTI_OUTCOME + (1|ALF_PE), weights=weight, data = Cohortcc)
+
+MICR <- coxph(Surv(MITime, MI_WITHIN90) ~ UTI_OUTCOME, data = Cohortcc)
+StrokeCR<- coxph(Surv(StrokeTime, STROKE_WITHIN90) ~ UTI_OUTCOME, data = Cohortcc)
+
+
+rescc[1,1]<-paste(round(exp(MIHR$coefficients[1]),2)," [",round(exp(confint(MIHR)[1,1]),2),",",round(exp(confint(MIHR)[1,2]),2), "]" ,sep="")
+rescc[1,2]<-paste(round(exp(MICR$coefficients[1]),2)," [",round(exp(confint(MICR)[1,1]),2),",",round(exp(confint(MICR)[1,2]),2), "]" ,sep="")
+rescc[1,3]<-round(sum(Cohortcc$MI_WITHIN90==1&Cohortcc$UTI_OUTCOME=="Confirmed UTI"),-1)
+rescc[1,4]<-round(sum(Cohortcc$MI_WITHIN90==1&Cohortcc$UTI_OUTCOME=="No microbiological evidence of UTI"),-1)
+
+rescc[2,1]<-paste(round(exp(StrokeHR$coefficients[1]),2)," [",round(exp(confint(StrokeHR)[1,1]),2),",",round(exp(confint(StrokeHR)[1,2]),2), "]" ,sep="")
+rescc[2,2]<-paste(round(exp(StrokeCR$coefficients[1]),2)," [",round(exp(confint(StrokeCR)[1,1]),2),",",round(exp(confint(StrokeCR)[1,2]),2), "]" ,sep="")
+rescc[2,3]<-round(sum(Cohortcc$STROKE_WITHIN90==1&Cohortcc$UTI_OUTCOME=="Confirmed UTI"),-1)
+rescc[2,4]<-round(sum(Cohortcc$STROKE_WITHIN90==1&Cohortcc$UTI_OUTCOME=="No microbiological evidence of UTI"),-1)
+
+
+return(rescc)
+}
+
+
+```
+
+```{r GetPooledFunc}
+#full data (imputed)
+
+#get results (where mHR is object produced by running cox on multiply imputed datasets, that have previously has propensity score and weights calculated and added) by:
+#res<-as.mira(mHR)
+#pool(res)# doesn't work with coxme
+
+#tabulate parameter estimates and their variances - 
+#se given in model results is calculated by print function, so can't be extracted. So calculate using the code within the print function. 
+
+#generalised for any number of coefficients
+getPooledHR<-function(mHR){
+  nvar<-length(mHR$`1`$coefficients)
+  nfrail<-nrow(mHR$`1`$var)-nvar
+  
+  res<-matrix(c(
+  mHR$`1`$coefficients, diag(mHR$`1`$var)[nfrail+1:nvar],
+mHR$`2`$coefficients,  diag(mHR$`2`$var)[nfrail+1:nvar],
+mHR$`3`$coefficients,  diag(mHR$`3`$var)[nfrail+1:nvar],
+mHR$`4`$coefficients,  diag(mHR$`4`$var)[nfrail+1:nvar],
+mHR$`5`$coefficients,  diag(mHR$`5`$var)[nfrail+1:nvar],
+mHR$`6`$coefficients, diag(mHR$`6`$var)[nfrail+1:nvar],
+mHR$`7`$coefficients,  diag(mHR$`7`$var)[nfrail+1:nvar],
+mHR$`8`$coefficients,  diag(mHR$`8`$var)[nfrail+1:nvar],
+mHR$`9`$coefficients,  diag(mHR$`9`$var)[nfrail+1:nvar],
+mHR$`10`$coefficients,  diag(mHR$`10`$var)[nfrail+1:nvar]
+  ),byrow=T,ncol=2*nvar)
+
+  resPool<-matrix(nrow=2,ncol=nvar)
+  for (i in 1:nvar)
+  {
+    resPool[1,i]<-pool.scalar(res[,i],res[,nvar+i],n=mHR$`1`$n[2])$qbar
+    resPool[2,i]<-pool.scalar(res[,i],res[,nvar+i],n=mHR$`1`$n[2])$ubar
+  }
+
+  #qbar = pooled estimates, ubar=mean of variances
+  coef<-resPool[1,]#log(HR)
+  se<-sqrt(resPool[2,])
+  ciu<-coef+1.96*se
+  cil<-coef-1.96*se
+  #return(c(exp(coef),exp(cil),exp(ciu)))
+  return(paste(round(exp(coef),2), " [", round(exp(cil),2), ",", round(exp(ciu),2), "]", sep=""))
+}
+
+```
+
+```{r ImputationIPTW}
+#multiple imputation of missing data 
+#only include required columns - for propensity score, times and outcomes
+CohortIm<-Cohort[,c("MITime","StrokeTime","MI_WITHIN90","STROKE_WITHIN90","UTI_OUTCOME", "AGE_AT_DIAG", "BMI_VAL", "DEMENTIA", "WIMD", "DIABETES", "ETHNIC", "EFI", "HRT", "RENAL_DISEASE", "PARKINSONS", "MND", "MS", "GNDR_CD","PRIM_IMMDEF","AUTOIMM")]
+miCohort<-mice(CohortIm,m=10, print=FALSE)
+
+miCohortLong<-complete(miCohort, "long", include=TRUE)#imputed datasets in long format, including original dataset, needed to turn back into mids object
+
+#Propensity score model, fit to multiply imputed datasets
+IPTW<-by(miCohortLong, miCohortLong$.imp, function(x) {
+    PropScore<-with(x, glm(UTI_OUTCOME~AGE_AT_DIAG+BMI_VAL+DEMENTIA+WIMD+DIABETES+ETHNIC+EFI+HRT+RENAL_DISEASE+PARKINSONS+MND+MS+GNDR_CD+PRIM_IMMDEF+AUTOIMM, family=binomial(link="logit"))$fitted)
+    
+    #calculate weight
+    weight<-ifelse(x$UTI_OUTCOME=="Confirmed UTI",1/(PropScore),1/(1-PropScore))
+    
+    return(weight)
+})
+
+IPTW$`0`<-rep(NA,length(IPTW$`0`))
+
+miCohortLong$weight<-unlist(IPTW)
+miCohortLong$PID<-rep(Cohort$ALF_PE,11)#add ID back in
+miCohort<-as.mids(miCohortLong)
+
+#per Rubin's rule, the point estimate of a prediction is the average of the m estimates (paper: obtaining predictions from models fit to multiply imputed data, Miles 2015)
+
+
+
+```
+
+```{r MainAnalysis,include=FALSE}
+#Cox prop hazards
+#90 days
+
+Analysis<-function(Cohort){
+
+#set up results table
+results<-matrix(nrow=2,ncol=4)
+results<-data.frame(results)
+colnames(results)<-c("HR","Crude","NEventsConfirmed","NEventsNoMicroEv")
+rownames(results)<-c("MI","Stroke")
+
+miCohortLong<-complete(miCohort, "long")
+
+MIHR<-by(miCohortLong, miCohortLong$.imp, function(x) { #apply function to miRTIlongw, split by factor .imp
+  #hazard ratios
+  PropHazard <- with(x,coxme(Surv(MITime, MI_WITHIN90) ~ UTI_OUTCOME + (1|PID),weights=weight))
+  return(PropHazard)
+})
+
+MItest<-cox.zph(MIHR$`1`)
+
+StrokeHR<-by(miCohortLong, miCohortLong$.imp, function(x) { #apply function to miRTIlongw, split by factor .imp
+  #hazard ratios
+  PropHazard <- with(x,coxme(Surv(StrokeTime, STROKE_WITHIN90) ~ UTI_OUTCOME + (1|PID),weights=weight))
+  return(PropHazard)
+})
+
+Stroketest<-cox.zph(StrokeHR$`1`)
+
+MICR <- with(Cohort, coxph(Surv(MITime, MI_WITHIN90) ~ UTI_OUTCOME))
+StrokeCR<- with(Cohort, coxph(Surv(StrokeTime, STROKE_WITHIN90) ~ UTI_OUTCOME))
+
+results[1,1]<-getPooledHR(MIHR)
+
+res<-summary(pool(MICR),conf.int=T,exponentiate = T)
+results[1,2]<-paste(round(res$estimate[1],2)," [",round(res$`2.5 %`[1] ,2),",",round(res$`97.5 %`[1],2), "]" ,sep="")
+
+
+results[1,3]<-round(sum(Cohort$data$MI_WITHIN90==1&Cohort$data$UTI_OUTCOME=="Confirmed UTI"),-1)
+
+results[1,4]<-round(sum(Cohort$data$MI_WITHIN90==1&Cohort$data$UTI_OUTCOME=="No microbiological evidence of UTI"),-1)
+
+results[2,1]<-getPooledHR(StrokeHR)
+
+res<-summary(pool(StrokeCR),conf.int=T,exponentiate = T)
+results[2,2]<-paste(round(res$estimate[1],2)," [",round(res$`2.5 %`[1] ,2),",",round(res$`97.5 %`[1],2), "]" ,sep="")
+
+results[2,3]<-round(sum(Cohort$data$STROKE_WITHIN90==1&Cohort$data$UTI_OUTCOME=="Confirmed UTI"),-1)
+results[2,4]<-round(sum(Cohort$data$STROKE_WITHIN90==1&Cohort$data$UTI_OUTCOME=="No microbiological evidence of UTI"),-1)
+
+
+return(list(results,MItest,Stroketest))
+}
+
+
+```
+
+## Cox Model
+coxme(Surv(TimeToEvent, EventStatus) ~ UTI_outcome + (1|ALF_PE), weights=weight)
+
+## Hazard Ratios
+Includes all data, with missing values in WIMD Quintile, BMI and ethnicity imputed. Propensity scores and IPTW are calculated on all ten datasets, then the Cox model is fitted and results are pooled. Hazard ratios are the hazard for those with confirmed UTI, compared to those with no microbiological evidence of UTI. Hazard ratios are given for 0-90 days, along with the corresponding confidence intervals. Follow up time is total follow up time in years.
+
+```{r MainAnalysisRes}
+
+#followup time
+Follow<-matrix(nrow=2,ncol=2)
+Follow<-data.frame(Follow)
+colnames(Follow)<-c("Confirmed","No micro ev")
+rownames(Follow)<-c("MI","Stroke")
+
+Follow[1,1]<-round(as.numeric(sum(Cohort$MITime[Cohort$UTI_OUTCOME=="Confirmed UTI"]))/365,2)
+Follow[1,2]<-round(as.numeric(sum(Cohort$MITime[Cohort$UTI_OUTCOME=="No microbiological evidence of UTI"]))/365,2)
+Follow[2,1]<-round(as.numeric(sum(Cohort$StrokeTime[Cohort$UTI_OUTCOME=="Confirmed UTI"]))/365,2)
+Follow[2,2]<-round(as.numeric(sum(Cohort$StrokeTime[Cohort$UTI_OUTCOME=="No microbiological evidence of UTI"]))/365,2)
+
+kable_styling(kable_input = kbl(Follow,caption = "Follow-up time in years"),full_width = FALSE,position = "left", font_size = 12 )
+
+full<-Analysis(miCohort)
+
+#full data results
+kable_styling(kable_input = kbl(full[[1]],caption = ""),full_width = FALSE,position = "left", font_size = 12 )
+
+```
+
+
+## Proportional Hazards Assumption 
+
+The proportional hazards assumption was assessed visually using Kaplan Meier plots (not shown), and by a formal score test for slope = 0 (Grambsch, P. and Therneau, T. 1994).
+
+MI
+```{r }
+full[[2]]
+```
+
+Stroke
+```{r }
+full[[3]]
+```
+
+```{r prophaz}
+
+#Kaplan Meier plots 
+
+#plot(survfit(Surv(miCohortLong$MITime, miCohortLong$MI_WITHIN90) ~ miCohortLong$UTI_OUTCOME, weights=miCohortLong$weight), ylim=c(0.99,1),main="MI",col=c(1,2),lty=c(1,2))
+
+
+
+#plot(survfit(Surv(miCohortLong$StrokeTime, miCohortLong$STROKE_WITHIN90) ~ miCohortLong$UTI_OUTCOME, weights=miCohortLong$weight), ylim=c(0.99,1),main="Stroke",col=c(1,2),lty=c(1,2))
+
+
+
+```
+
+## Complete Case
+Uses only individuals with no missing data, and therefore no imputation. Analysis is otherwise as previously.
+
+```{r CompleteCaseRes}
+#followup time
+FollowCC<-matrix(nrow=2,ncol=2)
+FollowCC<-data.frame(FollowCC)
+colnames(FollowCC)<-c("Confirmed","No micro ev")
+rownames(FollowCC)<-c("MI","Stroke")
+
+FollowCC[1,1]<-round(as.numeric(sum(Cohortcc$MITime[Cohortcc$UTI_OUTCOME=="Confirmed UTI"]))/365,2)
+FollowCC[1,2]<-round(as.numeric(sum(Cohortcc$MITime[Cohortcc$UTI_OUTCOME=="No microbiological evidence of UTI"]))/365,2)
+FollowCC[2,1]<-round(as.numeric(sum(Cohortcc$StrokeTime[Cohortcc$UTI_OUTCOME=="Confirmed UTI"]))/365,2)
+FollowCC[2,2]<-round(as.numeric(sum(Cohortcc$StrokeTime[Cohortcc$UTI_OUTCOME=="No microbiological evidence of UTI"]))/365,2)
+
+kable_styling(kable_input = kbl(FollowCC,caption = "Follow-up time in years"),full_width = FALSE,position = "left", font_size = 12 )
+
+#complete case results
+rescc<-ccAnalysis(Cohortcc)
+
+kable_styling(kable_input = kbl(rescc,caption = ""),full_width = FALSE,position = "left", font_size = 12 )
+```
