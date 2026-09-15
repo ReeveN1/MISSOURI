@@ -8,6 +8,12 @@ This is a substudy of the MISSOURI project. Some of this code builds on tables d
 ## Summary
 To examine whether microbiological confirmation of urinary tract infection (UTI) compared to no growth is associated with differential risk of myocardial infarction (MI) or stroke among adults presenting to primary care with suspected UTI.
 
+## Files
+gp_substudy_cohort_v2.sql contains code used to create the data tables used for the analysis.
+Cohort_Analysis.Rmd contains the analysis code.
+Example_Model_Output.txt cotains an example of the full model output from models in Cohort_Analysis.Rmd.
+Side_Study_DAG_Code.txt contains code which can be added to Dagitty.net to produce the DAG used in this study.
+
 ## Funding
 This work was supported by The British Heart Foundation, grant number PG/20/10419. 
 
